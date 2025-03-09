@@ -53,8 +53,15 @@ def sample_single_chain(
             "You are taking more sample batches than there are dataloader batches available, this removes some randomness from sampling but is probably fine. (All sample batches beyond the number dataloader batches are cycled from the start, f.e. 9 samples from [A, B, C] would be [B, A, C, B, A, C, B, A, C].)"
         )
 
-    # Initialize new model and optimizer for this chain
-    model = deepcopy(ref_model).to(device)
+    # Smuggling in named_params through optimizer_kwargs is a little hacky
+    # Maybe better to just pass named_params as a separate argument
+    # Also this approach probably doesn't work with multiple GPUs
+    model = ref_model.to(device)
+    if 'named_params' in optimizer_kwargs:
+        named_params = optimizer_kwargs.pop('named_params')
+    else:
+        named_params = model.named_parameters()
+    ref_named_params = deepcopy(named_params)
 
     if "temperature" in optimizer_kwargs:
         assert (
@@ -78,7 +85,7 @@ def sample_single_chain(
 
     if optimize_over_per_model_param:
         param_groups = []
-        for name, parameter in model.named_parameters():
+        for name, parameter in named_params:
             param_groups.append(
                 {
                     "params": parameter,
@@ -90,7 +97,7 @@ def sample_single_chain(
             **optimizer_kwargs,
         )
     else:
-        optimizer = sampling_method(model.parameters(), **optimizer_kwargs)
+        optimizer = sampling_method(named_params.values(), **optimizer_kwargs)
 
     if seed is not None:
         torch.manual_seed(seed)
@@ -137,6 +144,9 @@ def sample_single_chain(
                 optimizer.zero_grad()
                 cumulative_loss = 0
                 pbar.update(1)
+
+    # Restore orginal params
+    model.load_state_dict(ref_named_params, strict=False)
 
 
 def _sample_single_chain(kwargs):
