@@ -41,6 +41,7 @@ def sample_single_chain(
     optimize_over_per_model_param: Optional[dict] = None,
     callbacks: List[SamplerCallback] = [],
     use_amp: bool = False,
+    copy_full_model: bool=True,
     **kwargs,
 ):
     if grad_accum_steps > 1:
@@ -53,15 +54,16 @@ def sample_single_chain(
             "You are taking more sample batches than there are dataloader batches available, this removes some randomness from sampling but is probably fine. (All sample batches beyond the number dataloader batches are cycled from the start, f.e. 9 samples from [A, B, C] would be [B, A, C, B, A, C, B, A, C].)"
         )
 
-    # Smuggling in named_params through optimizer_kwargs is a little hacky
-    # Maybe better to just pass named_params as a separate argument
-    # Also this approach probably doesn't work with multiple GPUs
-    model = ref_model.to(device)
+    if copy_full_model:
+        model = deepcopy(ref_model).to(device)
+    else:
+        model = ref_model.to(device)
     if 'named_params' in optimizer_kwargs:
         named_params = optimizer_kwargs.pop('named_params')
     else:
         named_params = model.named_parameters()
-    ref_named_params = deepcopy(named_params)
+    if not copy_full_model:
+        ref_named_params = deepcopy(named_params)
 
     if "temperature" in optimizer_kwargs:
         assert (
@@ -146,7 +148,8 @@ def sample_single_chain(
                 pbar.update(1)
 
     # Restore orginal params
-    model.load_state_dict(ref_named_params, strict=False)
+    if not copy_full_model:
+        model.load_state_dict(ref_named_params, strict=False)
 
 
 def _sample_single_chain(kwargs):
@@ -352,6 +355,7 @@ def sample(
         verbose=verbose,
         optimize_over_per_model_param=optimize_over_per_model_param,
         use_amp=use_amp,
+        copy_full_model=cores > 1,
     )
 
     if cores > 1:
